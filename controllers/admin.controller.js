@@ -2,13 +2,16 @@ import csv from "csv-parser";
 import { Readable } from "stream";
 import mongoose from "mongoose";
 import connectDB from "../db/index.js";
-import { facultyAdmin, studentAdmin } from "../utils/firebase-admin.js";
+import { firebaseAdmin } from "../utils/firebase-admin.js";
 import {
   validateTimetableConflicts,
   parseTimetableCSV,
-  mapFacultyNamesToUIDs
+  mapFacultyNamesToUIDs,
 } from "../utils/timetable.utils.js";
-import { syncFacultySchedulesWithTimetable, getUniqueFacultyIdsFromTimetable } from "../utils/faculty-sync.utils.js";
+import {
+  syncFacultySchedulesWithTimetable,
+  getUniqueFacultyIdsFromTimetable,
+} from "../utils/faculty-sync.utils.js";
 import { Admin } from "../models/admin.model.js";
 import { Faculty } from "../models/faculty.model.js";
 import { Student } from "../models/student.model.js";
@@ -16,9 +19,7 @@ import { School } from "../models/school.model.js";
 import { Subject } from "../models/subject.model.js";
 import { Timetable } from "../models/timetable.model.js";
 
-
 await connectDB();
-
 
 const getAdminInfo = async (req, res) => {
   try {
@@ -38,14 +39,16 @@ const getAdminInfo = async (req, res) => {
           // Fetch school details using schoolid
           const school = await School.findOne({
             id: admin.schoolId,
-          }).lean().exec();
+          })
+            .lean()
+            .exec();
 
           return {
             ...admin,
             school: school
               ? {
-                name: school.name,
-              }
+                  name: school.name,
+                }
               : null,
           };
         }
@@ -81,7 +84,9 @@ const updateProfile = async (req, res) => {
       { uid: uid },
       { $set: updates },
       { returnDocument: "after" }
-    ).lean().exec();
+    )
+      .lean()
+      .exec();
 
     // console.log(result);
 
@@ -150,7 +155,7 @@ const addFaculties = async (req, res) => {
         // Create Firebase user
         let firebaseUser;
         try {
-          firebaseUser = await facultyAdmin.auth().createUser({
+          firebaseUser = await firebaseAdmin.auth().createUser({
             email,
             password,
             displayName: name,
@@ -159,7 +164,7 @@ const addFaculties = async (req, res) => {
         } catch (e) {
           if (e.code === "auth/email-already-exists") {
             // If user exists, get the existing user
-            firebaseUser = await facultyAdmin.auth().getUserByEmail(email);
+            firebaseUser = await firebaseAdmin.auth().getUserByEmail(email);
           } else {
             throw e;
           }
@@ -185,7 +190,9 @@ const addFaculties = async (req, res) => {
           },
           facultyData,
           { upsert: true, new: true, setDefaultsOnInsert: true }
-        ).lean().exec();
+        )
+          .lean()
+          .exec();
 
         processedFaculties.push({
           uid: firebaseUser.uid,
@@ -278,7 +285,7 @@ const addStudents = async (req, res) => {
         // Create Firebase user
         let firebaseUser;
         try {
-          firebaseUser = await studentAdmin.auth().createUser({
+          firebaseUser = await firebaseAdmin.auth().createUser({
             email,
             password,
             displayName: name,
@@ -287,7 +294,7 @@ const addStudents = async (req, res) => {
         } catch (firebaseError) {
           if (firebaseError.code === "auth/email-already-exists") {
             // If user exists, get the existing user
-            firebaseUser = await studentAdmin.auth().getUserByEmail(email);
+            firebaseUser = await firebaseAdmin.auth().getUserByEmail(email);
           } else {
             throw firebaseError;
           }
@@ -311,11 +318,13 @@ const addStudents = async (req, res) => {
         };
 
         // Insert into MongoDB
-        await Student.findOneAndUpdate(
-          { email },
-          studentData,
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        ).lean().exec();
+        await Student.findOneAndUpdate({ email }, studentData, {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        })
+          .lean()
+          .exec();
 
         processedStudents.push({
           uid: firebaseUser.uid,
@@ -422,7 +431,9 @@ const addSubjects = async (req, res) => {
           { code: code.toUpperCase() },
           subjectData,
           { upsert: true, new: true, setDefaultsOnInsert: true }
-        ).lean().exec();
+        )
+          .lean()
+          .exec();
 
         processedSubjects.push({
           _id: subject._id,
@@ -471,8 +482,8 @@ const getSubjects = async (req, res) => {
 
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { code: { $regex: search, $options: 'i' } }
+        { name: { $regex: search, $options: "i" } },
+        { code: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -527,7 +538,7 @@ const uploadTimetable = async (req, res) => {
     try {
       timetableData = parseTimetableCSV(csvContent);
     } catch (parseError) {
-      console.error('[Admin API] CSV parsing error:', parseError);
+      console.error("[Admin API] CSV parsing error:", parseError);
       return res.status(400).json({
         error: "CSV parsing error",
         message: parseError.message,
@@ -542,7 +553,7 @@ const uploadTimetable = async (req, res) => {
     const facultyIdToUidMap = {};
     const subjectCodeToDetailsMap = {};
 
-    faculties.forEach(faculty => {
+    faculties.forEach((faculty) => {
       if (faculty.facultyId) {
         facultyIdToUidMap[faculty.facultyId.trim().toUpperCase()] = {
           facultyId: faculty.facultyId,
@@ -551,11 +562,11 @@ const uploadTimetable = async (req, res) => {
       }
     });
 
-    subjects.forEach(subject => {
+    subjects.forEach((subject) => {
       if (subject.code) {
         subjectCodeToDetailsMap[subject.code.trim().toUpperCase()] = {
           name: subject.name,
-          code: subject.code
+          code: subject.code,
         };
       }
     });
@@ -624,8 +635,13 @@ const uploadTimetable = async (req, res) => {
     const uniqueUnmappedSubjectCodes = [...new Set(unmappedSubjectCodes)];
 
     // Check for conflicts
-    const existingTimetables = await Timetable.find({ isActive: true }).lean().exec();
-    const validation = validateTimetableConflicts(timetableData, existingTimetables);
+    const existingTimetables = await Timetable.find({ isActive: true })
+      .lean()
+      .exec();
+    const validation = validateTimetableConflicts(
+      timetableData,
+      existingTimetables
+    );
 
     if (!validation.isValid) {
       return res.status(409).json({
@@ -702,7 +718,6 @@ const uploadTimetable = async (req, res) => {
       },
       warnings: Object.keys(warnings).length > 0 ? warnings : undefined,
     });
-
   } catch (error) {
     console.error("[Admin API] Error uploading timetable CSV:", error);
     res.status(500).json({
@@ -711,7 +726,6 @@ const uploadTimetable = async (req, res) => {
     });
   }
 };
-
 
 const getTimetables = async (req, res) => {
   try {
@@ -724,7 +738,10 @@ const getTimetables = async (req, res) => {
     if (isActive !== undefined) filter.isActive = isActive === "true";
     if (classId) filter.classId = classId;
 
-    const timetables = await Timetable.find(filter).sort({ createdAt: -1 }).lean().exec();
+    const timetables = await Timetable.find(filter)
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
 
     res.json({
       success: true,
@@ -784,8 +801,12 @@ const updateTimetable = async (req, res) => {
 
     // Validate dates if provided
     if (updates.validFrom || updates.validUntil) {
-      const validFrom = updates.validFrom ? new Date(updates.validFrom) : existing.validFrom;
-      const validUntil = updates.validUntil ? new Date(updates.validUntil) : existing.validUntil;
+      const validFrom = updates.validFrom
+        ? new Date(updates.validFrom)
+        : existing.validFrom;
+      const validUntil = updates.validUntil
+        ? new Date(updates.validUntil)
+        : existing.validUntil;
 
       if (validFrom >= validUntil) {
         return res.status(400).json({
@@ -799,7 +820,9 @@ const updateTimetable = async (req, res) => {
       id,
       { $set: updates },
       { new: true, runValidators: true }
-    ).lean().exec();
+    )
+      .lean()
+      .exec();
 
     res.json({
       success: true,
@@ -840,7 +863,9 @@ const deleteTimetable = async (req, res) => {
         id,
         { $set: { isActive: false } },
         { new: true }
-      ).lean().exec();
+      )
+        .lean()
+        .exec();
 
       if (!result) {
         return res.status(404).json({
@@ -874,5 +899,5 @@ export {
   getTimetables,
   getTimetableById,
   updateTimetable,
-  deleteTimetable
+  deleteTimetable,
 };
